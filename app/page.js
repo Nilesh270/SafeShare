@@ -1,103 +1,147 @@
-import Image from "next/image";
+"use client";
+import { useState, useEffect } from "react";
+import { useWallet } from "./hooks/useWallet";
+import { useDriveContract } from "./hooks/useDriveContract";
+import { uploadFileToIPFS } from "./lib/pinata";
+
+import { Sidebar } from "./components/Sidebar";
+import { Topbar } from "./components/Topbar";
+import { FileList } from "./components/FileList";
+import { UploadDialog } from "./components/UploadDialog";
+import ShareDialog from "./components/ShareDialog";
+import TransferDialog from "./components/TransferDialog";
+import { toast } from "react-toastify";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.js
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const router = useRouter();
+  const { account, signer, disconnectWallet } = useWallet();
+  const contract = useDriveContract(signer);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  const [tab, setTab] = useState("My Files");
+  const [myFiles, setMyFiles] = useState([]);
+  const [sharedFiles, setSharedFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [selectedCid, setSelectedCid] = useState(null);
+
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
+  const [selectedTransferCid, setSelectedTransferCid] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!contract || !account) return;
+      setMyFiles(await contract.getMyFiles());
+      setSharedFiles(await contract.getSharedFiles());
+    };
+    load();
+  }, [contract, account]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !contract) return;
+    setUploading(true);
+    try {
+      const { cid, fileName } = await uploadFileToIPFS(file);
+      const tx = await contract.uploadFile(cid, fileName);
+      await tx.wait();
+
+      setMyFiles((prev) => [...prev, { cid, fileName }]);
+      toast.success("File uploaded successfully!");
+      router.push("/");
+    } catch (err) {
+      console.error(err);
+      // alert("Upload failed");
+      toast.error("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const openShareDialog = (cid) => {
+    setSelectedCid(cid);
+    setIsShareDialogOpen(true);
+  };
+
+  const handleConfirmShare = async (cid, recipient) => {
+    if (!recipient || !contract) return;
+    try {
+      const tx = await contract.shareFile(cid, recipient);
+      await tx.wait();
+      // alert("File shared!");
+      toast.success("File shared!");
+    } catch (err) {
+      console.error(err);
+      // alert("Failed to share file");
+      toast.error("Failed to share file");
+    }
+  };
+
+  const openTransferDialog = (cid) => {
+    setSelectedTransferCid(cid);
+    setIsTransferDialogOpen(true);
+  };
+
+  const handleConfirmTransfer = async (cid, newOwner) => {
+    if (!newOwner || !contract) return;
+    try {
+      const tx = await contract.transferOwnership(cid, newOwner);
+      await tx.wait();
+      toast.success("Ownership transferred!");
+      // alert("Ownership transferred!");
+      setMyFiles(await contract.getMyFiles()); // refresh
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to transfer ownership");
+      // alert("Failed to transfer ownership");
+    }
+  };
+
+  return (
+    <div className="flex h-screen">
+      <Sidebar onSelect={setTab} />
+      <div className="flex-1 flex flex-col">
+        <Topbar account={account} onDisconnect={disconnectWallet} />
+        <div className="p-6">
+          {tab === "My Files" && (
+            <FileList
+              files={myFiles}
+              onShare={openShareDialog}
+              onTransfer={openTransferDialog}
+              trans={true}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          )}
+          {tab === "Shared With Me" && (
+            <FileList
+              files={sharedFiles}
+              onShare={() => {}}
+              onTransfer={() => {}}
+              trans={false}
+            />
+          )}
+          {tab === "Upload" && <UploadDialog onUpload={handleUpload} />}
+          {tab === "Settings" && (
+            <p className="text-gray-500">🔧 Coming Soon</p>
+          )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
+
+      {/* Share Dialog */}
+      <ShareDialog
+        open={isShareDialogOpen}
+        onClose={() => setIsShareDialogOpen(false)}
+        onShare={handleConfirmShare}
+        cid={selectedCid}
+      />
+
+      {/*  Transfer Dialog */}
+      <TransferDialog
+        open={isTransferDialogOpen}
+        onClose={() => setIsTransferDialogOpen(false)}
+        onTransfer={handleConfirmTransfer}
+        cid={selectedTransferCid}
+      />
     </div>
   );
 }
